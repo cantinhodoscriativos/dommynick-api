@@ -6,7 +6,6 @@ require('dotenv').config();
 const app = express();
 const PORT = process.env.PORT || 10000;
 
-// Inicializa a OpenAI com a chave salva nas variáveis de ambiente
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
 });
@@ -14,12 +13,10 @@ const openai = new OpenAI({
 app.use(cors());
 app.use(express.json());
 
-// Rota inicial de verificação
 app.get('/', (req, res) => {
   res.json({ message: 'API Central DOMMYNICK rodando com sucesso!' });
 });
 
-// Rota do Chat com Inteligência Artificial
 app.post('/chat', async (req, res) => {
   try {
     const { message } = req.body;
@@ -29,9 +26,9 @@ app.post('/chat', async (req, res) => {
     }
 
     const completion = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
+      model: 'gpt-3.5-turbo',
       messages: [
-        { role: 'system', content: 'Você é o assistente virtual da plataforma DOMMYNICK, prestativo e direto.' },
+        { role: 'system', content: 'Você é o assistente virtual da plataforma DOMMYNICK, especialista em Autoridade Digital, Oratória e Estratégia.' },
         { role: 'user', content: message }
       ],
     });
@@ -41,7 +38,7 @@ app.post('/chat', async (req, res) => {
 
   } catch (error) {
     console.error('Erro na chamada da OpenAI:', error);
-    res.status(500).json({ error: 'Erro ao processar a requisição de IA.' });
+    res.status(500).json({ error: error.message || 'Erro ao processar a requisição de IA.' });
   }
 });
 
