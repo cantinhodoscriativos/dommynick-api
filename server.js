@@ -49,8 +49,8 @@ DIRETRIZES DE COMUNICAÇÃO:
 - Não exiba links diretos nem dados pessoais hardcoded. Direcione os utilizadores para a Área VIP ou para os canais oficiais da plataforma de forma elegante.
 `;
 
-    // Chamada à API do Gemini (Modelo gemini-2.5-flash)
-    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`, {
+    // Chamada à API do Gemini (Modelo gemini-3.8-flash)
+    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=${apiKey}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
