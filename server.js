@@ -49,8 +49,8 @@ DIRETRIZES DE COMUNICAÇÃO:
 - Não exiba links diretos nem dados pessoais hardcoded. Direcione os utilizadores para a Área VIP ou para os canais oficiais da plataforma de forma elegante.
 `;
 
-    // Chamada à API Beta do Gemini (Modelo gemini-1.5-flash)
-    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`, {
+    // Chamada à API Beta do Gemini (Modelo gemini-1.5-flash-latest)
+    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${apiKey}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -78,3 +78,4 @@ DIRETRIZES DE COMUNICAÇÃO:
 app.listen(PORT, () => {
   console.log(`Servidor DOMMYNICK API ativo na porta ${PORT}`);
 });
+
