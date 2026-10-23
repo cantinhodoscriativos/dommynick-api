@@ -8,12 +8,73 @@ const PORT = process.env.PORT || 10000;
 app.use(cors());
 app.use(express.json());
 
-// Rota de teste simples
+// Banco de dados em memória temporária (salva enquanto o servidor estiver ativo)
+const vipLeadsDatabase = [];
+
+// Rota inicial de status da API
 app.get('/', (req, res) => {
-  res.json({ message: 'API Central DOMMYNICK (Gemini AI) rodando com sucesso!' });
+  res.json({ 
+    status: 'ONLINE',
+    message: 'API Central DOMMYNICK ativa!', 
+    total_leads_vip: vipLeadsDatabase.length 
+  });
 });
 
-// Rota Principal de Chatbot
+// 1. ROTA DE CAPTURA DA ÁREA VIP
+app.post('/vip-lead', async (req, res) => {
+  try {
+    const { name, email, whatsapp, instagram, tiktok } = req.body;
+
+    if (!name || !email || !whatsapp) {
+      return res.status(400).json({ error: 'Nome, E-mail e WhatsApp são obrigatórios.' });
+    }
+
+    const newLead = {
+      id: Date.now(),
+      name,
+      email,
+      whatsapp,
+      instagram: instagram || 'Não informado',
+      tiktok: tiktok || 'Não informado',
+      createdAt: new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })
+    };
+
+    // Guarda na memória do servidor
+    vipLeadsDatabase.push(newLead);
+    console.log('🔥 NOVO LEAD VIP CAPTURADO:', newLead);
+
+    // DISPARO AUTOMÁTICO DE NOTIFICAÇÃO (Webhook)
+    const webhookUrl = process.env.WEBHOOK_NOTIFICATION_URL;
+    if (webhookUrl) {
+      fetch(webhookUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          event: 'new_vip_lead',
+          lead: newLead,
+          messageText: `🚨 *NOVO LEAD VIP NA DOMMYNICK!*\n\n👤 *Nome:* ${newLead.name}\n📧 *E-mail:* ${newLead.email}\n📱 *WhatsApp:* ${newLead.whatsapp}\n📸 *Instagram:* ${newLead.instagram}\n🎵 *TikTok:* ${newLead.tiktok}\n📅 *Data:* ${newLead.createdAt}`
+        })
+      }).catch(err => console.error('Erro ao disparar Webhook de notificação:', err));
+    }
+
+    res.status(201).json({ 
+      success: true, 
+      message: 'Lead registrado e processado com sucesso!',
+      lead: newLead 
+    });
+
+  } catch (error) {
+    console.error('Erro ao salvar Lead VIP:', error);
+    res.status(500).json({ error: 'Erro interno ao processar cadastro VIP.' });
+  }
+});
+
+// Rota interna/protegida para consultar a lista de Leads via navegador
+app.get('/vip-leads-list', (req, res) => {
+  res.json({ total: vipLeadsDatabase.length, leads: vipLeadsDatabase });
+});
+
+// 2. ROTA PRINCIPAL DO CHATBOT (RESILIENTE COM FALLBACK DE MODELOS)
 app.post('/chat', async (req, res) => {
   try {
     const { message } = req.body;
@@ -24,10 +85,9 @@ app.post('/chat', async (req, res) => {
 
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) {
-      return res.status(500).json({ error: 'Chave GEMINI_API_KEY não encontrada nas variáveis de ambiente do Render.' });
+      return res.status(500).json({ error: 'Chave GEMINI_API_KEY não encontrada nas variáveis do Render.' });
     }
 
-    // SYSTEM PROMPT // O CÉREBRO DA DOMMYNICK
     const systemPrompt = `
 Você é a DOMMYNICK, a inteligência oficial e assistente estratégica do ecossistema de Wagner Dom.
 Sua missão é guiar profissionais, alunos e criadores na construção de sua Autoridade Digital com Propósito e no avanço na Oratória e Posicionamento Estratégico.
@@ -46,28 +106,46 @@ CONHECIMENTO BASE E PILARES:
 DIRETRIZES DE COMUNICAÇÃO:
 - Responda sempre em português, com tom profissional, motivador, direto, sofisticado e inspirador.
 - Relacione as dúvidas dos usuários aos pilares do Método DOM sempre que pertinente.
-- Não exiba links diretos nem dados pessoais hardcoded. Direcione os utilizadores para a Área VIP ou para os canais oficiais da plataforma de forma elegante.
 `;
 
-    // Chamada à API Estável do Gemini (v1)
-    const response = await fetch(`https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${apiKey}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{
-          parts: [{ text: `${systemPrompt}\n\nUsuário: ${message}` }]
-        }]
-      })
-    });
+    // Lista de endpoints para fallback caso algum oscile
+    const modelsToTry = [
+      'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent',
+      'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent',
+      'https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent'
+    ];
 
-    const data = await response.json();
+    let reply = null;
+    let lastError = null;
 
-    if (!response.ok) {
-      throw new Error(data.error?.message || 'Erro na resposta da API Gemini.');
+    for (const endpoint of modelsToTry) {
+      try {
+        const response = await fetch(`${endpoint}?key=${apiKey}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: `${systemPrompt}\n\nUsuário: ${message}` }] }]
+          })
+        });
+
+        const data = await response.json();
+
+        if (response.ok && data.candidates && data.candidates[0]?.content?.parts[0]?.text) {
+          reply = data.candidates[0].content.parts[0].text;
+          break; // Sucesso: sai do loop
+        } else {
+          lastError = data.error?.message || 'Erro na resposta do modelo.';
+        }
+      } catch (err) {
+        lastError = err.message;
+      }
     }
 
-    const reply = data.candidates[0].content.parts[0].text;
-    res.json({ response: reply });
+    if (reply) {
+      return res.json({ response: reply });
+    } else {
+      throw new Error(lastError || 'Não foi possível obter resposta de nenhum modelo do Gemini.');
+    }
 
   } catch (error) {
     console.error('Erro no servidor DOMMYNICK API:', error);
