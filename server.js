@@ -8,10 +8,10 @@ const PORT = process.env.PORT || 10000;
 app.use(cors());
 app.use(express.json());
 
-// Banco de dados em memória temporária (salva enquanto o servidor estiver ativo)
+// Banco de dados temporário em memória (salva enquanto o servidor estiver ativo)
 const vipLeadsDatabase = [];
 
-// Rota inicial de status da API
+// Rota inicial de teste/status da API
 app.get('/', (req, res) => {
   res.json({ 
     status: 'ONLINE',
@@ -20,7 +20,7 @@ app.get('/', (req, res) => {
   });
 });
 
-// 1. ROTA DE CAPTURA DA ÁREA VIP
+// 1. ROTA DE CAPTURA E NOTIFICAÇÃO DA ÁREA VIP
 app.post('/vip-lead', async (req, res) => {
   try {
     const { name, email, whatsapp, instagram, tiktok } = req.body;
@@ -39,7 +39,7 @@ app.post('/vip-lead', async (req, res) => {
       createdAt: new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })
     };
 
-    // Guarda na memória do servidor
+    // Guarda o lead no servidor
     vipLeadsDatabase.push(newLead);
     console.log('🔥 NOVO LEAD VIP CAPTURADO:', newLead);
 
@@ -59,7 +59,7 @@ app.post('/vip-lead', async (req, res) => {
 
     res.status(201).json({ 
       success: true, 
-      message: 'Lead registrado e processado com sucesso!',
+      message: 'Lead registrado com sucesso!',
       lead: newLead 
     });
 
@@ -69,12 +69,12 @@ app.post('/vip-lead', async (req, res) => {
   }
 });
 
-// Rota interna/protegida para consultar a lista de Leads via navegador
+// Rota para visualizar a lista de Leads cadastrados
 app.get('/vip-leads-list', (req, res) => {
   res.json({ total: vipLeadsDatabase.length, leads: vipLeadsDatabase });
 });
 
-// 2. ROTA PRINCIPAL DO CHATBOT (RESILIENTE COM FALLBACK DE MODELOS)
+// 2. ROTA PRINCIPAL DO CHATBOT (RESILIENTE COM ENDPOINTS V1BETA)
 app.post('/chat', async (req, res) => {
   try {
     const { message } = req.body;
@@ -108,11 +108,10 @@ DIRETRIZES DE COMUNICAÇÃO:
 - Relacione as dúvidas dos usuários aos pilares do Método DOM sempre que pertinente.
 `;
 
-    // Lista de endpoints para fallback caso algum oscile
+    // Apenas endpoints v1beta (v1beta/models) para evitar erros de versão da API do Gemini
     const modelsToTry = [
-      'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent',
-      'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent',
-      'https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent'
+      'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent',
+      'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent'
     ];
 
     let reply = null;
@@ -132,7 +131,7 @@ DIRETRIZES DE COMUNICAÇÃO:
 
         if (response.ok && data.candidates && data.candidates[0]?.content?.parts[0]?.text) {
           reply = data.candidates[0].content.parts[0].text;
-          break; // Sucesso: sai do loop
+          break; // Sucesso: encerra as tentativas
         } else {
           lastError = data.error?.message || 'Erro na resposta do modelo.';
         }
