@@ -74,18 +74,13 @@ app.get('/vip-leads-list', (req, res) => {
   res.json({ total: vipLeadsDatabase.length, leads: vipLeadsDatabase });
 });
 
-// 2. ROTA PRINCIPAL DO CHATBOT (RESILIENTE COM ENDPOINTS V1BETA)
+// 2. ROTA PRINCIPAL DO CHATBOT (MULTIPLATAFORMA E RESILIENTE)
 app.post('/chat', async (req, res) => {
   try {
     const { message } = req.body;
 
     if (!message) {
       return res.status(400).json({ error: 'A mensagem é obrigatória.' });
-    }
-
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) {
-      return res.status(500).json({ error: 'Chave GEMINI_API_KEY não encontrada nas variáveis do Render.' });
     }
 
     const systemPrompt = `
@@ -108,42 +103,110 @@ DIRETRIZES DE COMUNICAÇÃO:
 - Relacione as dúvidas dos usuários aos pilares do Método DOM sempre que pertinente.
 `;
 
-    // Apenas endpoints v1beta (v1beta/models) para evitar erros de versão da API do Gemini
-    const modelsToTry = [
-      'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent',
-      'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent'
-    ];
-
     let reply = null;
     let lastError = null;
 
-    for (const endpoint of modelsToTry) {
+    // --- TENTATIVA 1: GOOGLE GEMINI ---
+    const geminiKey = process.env.GEMINI_API_KEY;
+    if (geminiKey) {
+      const geminiModels = [
+        'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent',
+        'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent'
+      ];
+
+      for (const endpoint of geminiModels) {
+        try {
+          const response = await fetch(`${endpoint}?key=${geminiKey}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              contents: [{ parts: [{ text: `${systemPrompt}\n\nUsuário: ${message}` }] }]
+            })
+          });
+
+          const data = await response.json();
+          if (response.ok && data.candidates && data.candidates[0]?.content?.parts[0]?.text) {
+            reply = data.candidates[0].content.parts[0].text;
+            console.log('✅ Resposta gerada com sucesso via Gemini API');
+            break;
+          } else {
+            lastError = data.error?.message || 'Erro na resposta do Gemini.';
+          }
+        } catch (err) {
+          lastError = err.message;
+        }
+      }
+    }
+
+    // --- TENTATIVA 2: GROQ API (BACKUP SE GEMINI FALHAR) ---
+    const groqKey = process.env.GROQ_API_KEY;
+    if (!reply && groqKey) {
+      console.log('⚠️ Tentando resposta via backup Groq API...');
       try {
-        const response = await fetch(`${endpoint}?key=${apiKey}`, {
+        const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${groqKey}`
+          },
           body: JSON.stringify({
-            contents: [{ parts: [{ text: `${systemPrompt}\n\nUsuário: ${message}` }] }]
+            model: 'llama-3.3-70b-versatile',
+            messages: [
+              { role: 'system', content: systemPrompt },
+              { role: 'user', content: message }
+            ]
           })
         });
 
         const data = await response.json();
-
-        if (response.ok && data.candidates && data.candidates[0]?.content?.parts[0]?.text) {
-          reply = data.candidates[0].content.parts[0].text;
-          break; // Sucesso: encerra as tentativas
+        if (response.ok && data.choices && data.choices[0]?.message?.content) {
+          reply = data.choices[0].message.content;
+          console.log('✅ Resposta gerada com sucesso via Groq API');
         } else {
-          lastError = data.error?.message || 'Erro na resposta do modelo.';
+          lastError = data.error?.message || 'Erro na resposta da Groq API.';
         }
       } catch (err) {
         lastError = err.message;
       }
     }
 
+    // --- TENTATIVA 3: OPENROUTER API (SEGUNDO BACKUP) ---
+    const openRouterKey = process.env.OPENROUTER_API_KEY;
+    if (!reply && openRouterKey) {
+      console.log('⚠️ Tentando resposta via backup OpenRouter API...');
+      try {
+        const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${openRouterKey}`
+          },
+          body: JSON.stringify({
+            model: 'meta-llama/llama-3.3-70b-instruct:free',
+            messages: [
+              { role: 'system', content: systemPrompt },
+              { role: 'user', content: message }
+            ]
+          })
+        });
+
+        const data = await response.json();
+        if (response.ok && data.choices && data.choices[0]?.message?.content) {
+          reply = data.choices[0].message.content;
+          console.log('✅ Resposta gerada com sucesso via OpenRouter API');
+        } else {
+          lastError = data.error?.message || 'Erro na resposta da OpenRouter API.';
+        }
+      } catch (err) {
+        lastError = err.message;
+      }
+    }
+
+    // RETORNO FINAL
     if (reply) {
       return res.json({ response: reply });
     } else {
-      throw new Error(lastError || 'Não foi possível obter resposta de nenhum modelo do Gemini.');
+      throw new Error(lastError || 'Não foi possível obter resposta de nenhuma API configurada.');
     }
 
   } catch (error) {
