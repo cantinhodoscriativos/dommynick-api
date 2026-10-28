@@ -155,3 +155,4 @@ DIRETRIZES DE COMUNICAÇÃO:
 app.listen(PORT, () => {
   console.log(`Servidor DOMMYNICK API ativo na porta ${PORT}`);
 });
+
