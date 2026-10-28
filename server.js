@@ -1,82 +1,157 @@
 const express = require('express');
 const cors = require('cors');
-const https = require('https');
+require('dotenv').config();
 
 const app = express();
+const PORT = process.env.PORT || 10000;
+
 app.use(cors());
 app.use(express.json());
 
-const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
-const WEBHOOK_URL = process.env.WEBHOOK_NOTIFICATION_URL;
+// Banco de dados temporário em memória (salva enquanto o servidor estiver ativo)
+const vipLeadsDatabase = [];
 
-const SYSTEM_PROMPT = `Você é o DOMMYNICK, um assistente virtual especialista no Método DOM (Autoridade Digital com Propósito). Sua missão é ajudar empreendedores e criadores a construírem autoridade digital, destravarem a comunicação e aplicarem as táticas do Método DOM de forma direta, motivadora e estratégica.`;
+// Rota inicial de teste/status da API
+app.get('/', (req, res) => {
+  res.json({ 
+    status: 'ONLINE',
+    message: 'API Central DOMMYNICK ativa!', 
+    total_leads_vip: vipLeadsDatabase.length 
+  });
+});
 
-app.post('/api/chat', async (req, res) => {
-    const { message } = req.body;
-    if (!message) return res.status(400).json({ error: "A mensagem é obrigatória." });
+// 1. ROTA DE CAPTURA E NOTIFICAÇÃO DA ÁREA VIP
+app.post('/vip-lead', async (req, res) => {
+  try {
+    const { name, email, whatsapp, instagram, tiktok } = req.body;
 
-    if (!OPENROUTER_API_KEY) {
-        return res.status(500).json({ error: "Chave OPENROUTER_API_KEY não configurada." });
+    if (!name || !email || !whatsapp) {
+      return res.status(400).json({ error: 'Nome, E-mail e WhatsApp são obrigatórios.' });
     }
 
-    const dataToSend = JSON.stringify({
-        model: "deepseek/deepseek-r1:free",
-        messages: [
-            { role: "system", content: SYSTEM_PROMPT },
-            { role: "user", content: message }
-        ]
-    });
-
-    const options = {
-        hostname: 'openrouter.ai',
-        path: '/api/v1/chat/completions',
-        method: 'POST',
-        headers: {
-            'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
-            'HTTP-Referer': 'https://dommynick.net',
-            'X-Title': 'DOMMYNICK AI',
-            'Content-Type': 'application/json',
-            'Content-Length': Buffer.byteLength(dataToSend)
-        }
+    const newLead = {
+      id: Date.now(),
+      name,
+      email,
+      whatsapp,
+      instagram: instagram || 'Não informado',
+      tiktok: tiktok || 'Não informado',
+      createdAt: new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })
     };
 
-    const apiReq = https.request(options, (apiRes) => {
-        let responseData = '';
-        apiRes.on('data', (chunk) => { responseData += chunk; });
-        apiRes.on('end', () => {
-            try {
-                const parsed = JSON.parse(responseData);
-                if (apiRes.statusCode === 200 && parsed.choices && parsed.choices[0]?.message?.content) {
-                    return res.json({ reply: parsed.choices[0].message.content, provider: "DeepSeek" });
-                } else {
-                    console.error("Erro OpenRouter:", parsed);
-                    return res.status(500).json({ error: parsed.error?.message || "Erro na resposta da IA" });
-                }
-            } catch (e) {
-                console.error("Erro parse:", responseData);
-                return res.status(500).json({ error: "Erro interno de processamento" });
-            }
+    // Guarda o lead no servidor
+    vipLeadsDatabase.push(newLead);
+    console.log('🔥 NOVO LEAD VIP CAPTURADO:', newLead);
+
+    // DISPARO AUTOMÁTICO DE NOTIFICAÇÃO (Webhook)
+    const webhookUrl = process.env.WEBHOOK_NOTIFICATION_URL;
+    if (webhookUrl) {
+      fetch(webhookUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          event: 'new_vip_lead',
+          lead: newLead,
+          messageText: `🚨 *NOVO LEAD VIP NA DOMMYNICK!*\n\n👤 *Nome:* ${newLead.name}\n📧 *E-mail:* ${newLead.email}\n📱 *WhatsApp:* ${newLead.whatsapp}\n📸 *Instagram:* ${newLead.instagram}\n🎵 *TikTok:* ${newLead.tiktok}\n📅 *Data:* ${newLead.createdAt}`
+        })
+      }).catch(err => console.error('Erro ao disparar Webhook de notificação:', err));
+    }
+
+    res.status(201).json({ 
+      success: true, 
+      message: 'Lead registrado com sucesso!',
+      lead: newLead 
+    });
+
+  } catch (error) {
+    console.error('Erro ao salvar Lead VIP:', error);
+    res.status(500).json({ error: 'Erro interno ao processar cadastro VIP.' });
+  }
+});
+
+// Rota para visualizar a lista de Leads cadastrados
+app.get('/vip-leads-list', (req, res) => {
+  res.json({ total: vipLeadsDatabase.length, leads: vipLeadsDatabase });
+});
+
+// 2. ROTA PRINCIPAL DO CHATBOT (RESILIENTE COM ENDPOINTS V1BETA)
+app.post('/chat', async (req, res) => {
+  try {
+    const { message } = req.body;
+
+    if (!message) {
+      return res.status(400).json({ error: 'A mensagem é obrigatória.' });
+    }
+
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+      return res.status(500).json({ error: 'Chave GEMINI_API_KEY não encontrada nas variáveis do Render.' });
+    }
+
+    const systemPrompt = `
+Você é a DOMMYNICK, a inteligência oficial e assistente estratégica do ecossistema de Wagner Dom.
+Sua missão é guiar profissionais, alunos e criadores na construção de sua Autoridade Digital com Propósito e no avanço na Oratória e Posicionamento Estratégico.
+
+CONHECIMENTO BASE E PILARES:
+- Wagner Dom é mentor, estrategista digital, autor e desenvolvedor.
+- Autor das obras: "Autoridade Digital com Propósito", "O Poder da Autoridade na Oratória", "31 Técnicas para adquirir O Poder da Autoridade", entre outras.
+- Criador do "Método Os Vogais da Autoridade":
+  • A - Autoridade (Construção do nome e presença com valor real)
+  • E - Estratégia (Ações intencionais e direcionadas sem perder energia)
+  • I - Identificação (Conexão autêntica com a audiência e o público ideal)
+  • O - Oratória (Destravar a comunicação e dominar a fala perante as câmeras)
+  • U - Utilidade (Produção de conteúdo prático que resolve dores reais)
+- Foco em ajudar os alunos a superarem a "inércia digital" e acelerarem resultados.
+
+DIRETRIZES DE COMUNICAÇÃO:
+- Responda sempre em português, com tom profissional, motivador, direto, sofisticado e inspirador.
+- Relacione as dúvidas dos usuários aos pilares do Método DOM sempre que pertinente.
+`;
+
+    // Apenas endpoints v1beta (v1beta/models) para evitar erros de versão da API do Gemini
+    const modelsToTry = [
+      'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent',
+      'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent'
+    ];
+
+    let reply = null;
+    let lastError = null;
+
+    for (const endpoint of modelsToTry) {
+      try {
+        const response = await fetch(`${endpoint}?key=${apiKey}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: `${systemPrompt}\n\nUsuário: ${message}` }] }]
+          })
         });
-    });
 
-    apiReq.on('error', (err) => {
-        console.error("Erro requisição:", err.message);
-        return res.status(503).json({ reply: "Desculpa, tive um pequeno soluço técnico. Podes repetir?" });
-    });
+        const data = await response.json();
 
-    apiReq.write(dataToSend);
-    apiReq.end();
+        if (response.ok && data.candidates && data.candidates[0]?.content?.parts[0]?.text) {
+          reply = data.candidates[0].content.parts[0].text;
+          break; // Sucesso: encerra as tentativas
+        } else {
+          lastError = data.error?.message || 'Erro na resposta do modelo.';
+        }
+      } catch (err) {
+        lastError = err.message;
+      }
+    }
+
+    if (reply) {
+      return res.json({ response: reply });
+    } else {
+      throw new Error(lastError || 'Não foi possível obter resposta de nenhum modelo do Gemini.');
+    }
+
+  } catch (error) {
+    console.error('Erro no servidor DOMMYNICK API:', error);
+    res.status(500).json({ error: error.message || 'Erro interno ao processar a mensagem.' });
+  }
 });
 
-app.post('/api/lead', async (req, res) => {
-    return res.json({ success: true, message: "Lead recebido!" });
-});
-
-app.get('/', (req, res) => {
-    res.send("Servidor DOMMYNICK Nativo Ativo!");
-});
-
-const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-    console.log(`Servidor rodando na porta ${PORT}`);
+  console.log(`Servidor DOMMYNICK API ativo na porta ${PORT}`);
 });
